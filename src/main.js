@@ -27,6 +27,7 @@ const app = document.querySelector('#app');
 let repository, user, tasks = [], filter = 'all', busy = false, demo = !configured, currentWeek = weekStart();
 let sheetReturnFocus;
 let profile = {}, currentView = 'tasks', profileSaving = false;
+const expandedFriends = new Set();
 let friendsData = null, friendsLoading = false, friendsError = '', friendsWeek = weekStart(), friendsRequest = 0, friendsTimer;
 let appearance = readAppearance('login');
 applyAppearance(appearance);
@@ -143,6 +144,7 @@ function switchView(view, scroll = true) {
   if (scroll) window.scrollTo({ top: 0, behavior: 'instant' });
 }
 function resetFriends() {
+  expandedFriends.clear();
   friendsRequest++;
   clearInterval(friendsTimer);
   friendsData = null; friendsLoading = false; friendsError = ''; friendsWeek = weekStart();
@@ -163,8 +165,10 @@ async function loadFriends(quiet = false) {
     if (request === friendsRequest && source === repository) {
       friendsLoading = false;
       const restoreFocus = document.activeElement?.id === 'refresh-friends';
+      const restoreFriend = document.activeElement?.dataset.friendToggle;
       if (document.querySelector('#friends-view')) renderFriends();
       if (restoreFocus) document.querySelector('#refresh-friends')?.focus({ preventScroll: true });
+      if (restoreFriend) [...document.querySelectorAll('[data-friend-toggle]')].find((button) => button.dataset.friendToggle === restoreFriend)?.focus({ preventScroll: true });
       if (currentView === 'friends') document.querySelector('.week-badge').innerHTML = `<span class="live-dot"></span>${weekLabel(friendsWeek)}`;
     }
   }
@@ -190,23 +194,41 @@ function renderFriends() {
     ${friendsError ? `<div class="friends-error" role="alert"><span>${friendsData ? 'Не удалось обновить. Показаны последние загруженные данные.' : 'Не удалось загрузить участников.'}</span><p>${esc(friendsError)}</p><button class="text-button" id="retry-friends">Повторить</button></div>` : ''}
     ${!friendsData && friendsLoading ? '<div class="friends-loading" role="status">Загружаем участников…</div>' : ''}
     ${friendsData && !members.length ? `<div class="empty-state">${icon('friends')}<h3>Пока нет участников</h3><p>Они появятся здесь после входа в приложение.</p></div>` : ''}
-    <div class="friends-grid">${members.map((member) => {
+    <div class="friends-grid">${members.map((member, index) => {
       const color = validColor(member.accent_color) ? member.accent_color : appearance.accent;
       const percentage = member.stats.total ? Math.round(member.stats.done / member.stats.total * 100) : 0;
       return `<article class="friend-card" style="--friend-accent:${color}" aria-label="${esc(member.display_name)}: ${member.stats.done} из ${member.stats.total} задач выполнено">
         <div class="friend-heading"><div class="avatar">${avatarMarkup(member)}</div><div class="friend-identity"><h3>${esc(member.display_name)}${member.id === ownId ? '<span class="you-badge">Ты</span>' : ''}</h3>${member.telegram_username ? `<span>@${esc(member.telegram_username.replace(/^@/, ''))}</span>` : ''}</div><div class="friend-score"><strong>${member.stats.done}</strong><span>/${member.stats.total}</span></div></div>
         <div class="friend-progress" role="progressbar" aria-label="Выполнено задач за неделю" aria-valuemin="0" aria-valuemax="${member.stats.total || 1}" aria-valuenow="${member.stats.done}" aria-valuetext="${member.stats.done} из ${member.stats.total}"><span style="width:${percentage}%"></span></div>
-        ${member.closest.length ? `<ul class="friend-tasks" aria-label="Ближайшие к завершению задачи">${member.closest.map((task) => {
-          const level = LEVELS[task.difficulty - 1];
-          const progress = task.mode === 'percent' ? `${task.progress}<small>%</small>` : task.target === 1 ? '<span class="empty-check"></span>' : `${task.progress}<small>/${task.target}</small>`;
-          return `<li style="--level:${level.color}"><span class="friend-task-name">${esc(task.title)}</span><span class="progress-button friend-task-progress" aria-label="${task.progress} из ${task.target}${task.mode === 'percent' ? ' процентов' : ''}"><span class="progress-fill" style="height:${fraction(task) * 100}%"></span><span class="progress-value">${progress}</span></span></li>`;
-        }).join('')}</ul>` : `<div class="friend-empty">${member.stats.total ? `${icon('check')}<span>Все задачи выполнены</span>` : '<span>Нет задач на эту неделю</span>'}</div>`}
+        <div class="friend-task-panel">${friendTaskPanel(member, index)}</div>
       </article>`;
     }).join('')}</div>
     ${members.length ? `<section class="friends-breakdown" aria-label="Общая статистика участников"><div class="friends-breakdown-heading"><div><h2>Общая неделя</h2><p>${totals.done} из ${totals.total} задач выполнено</p></div><span class="friends-average">${totals.total ? (totals.weighted / totals.total).toFixed(1) : '—'}<small>средняя сложность</small></span></div><div class="chart" role="img" aria-label="${LEVELS.map((l, i) => `${l.label}: ${totals.distribution[i]}`).join(', ')}">${levels.map((level, i) => `<div class="chart-col" style="--level:${level.color};--bar-height:${totals.distribution[i] / max * 72}%"><div class="bar-space">${totals.distribution[i] ? `<span>${totals.distribution[i]}</span><div class="bar"></div>` : ''}</div><span class="chart-label">${level.label}</span></div>`).join('')}</div></section>` : ''}`;
+  container.onclick = (event) => {
+    const button = event.target.closest('[data-friend-toggle]');
+    if (!button || !container.contains(button)) return;
+    const index = members.findIndex((member) => member.id === button.dataset.friendToggle);
+    if (index < 0) return;
+    const member = members[index];
+    if (expandedFriends.has(member.id)) expandedFriends.delete(member.id);
+    else expandedFriends.add(member.id);
+    const panel = button.closest('.friend-task-panel');
+    panel.innerHTML = friendTaskPanel(member, index);
+    panel.querySelector('.friend-toggle').focus({ preventScroll: true });
+  };
   document.querySelector('#refresh-friends').onclick = () => loadFriends();
   document.querySelector('#retry-friends')?.addEventListener('click', () => loadFriends());
   wireAvatars();
+}
+function friendTaskPanel(member, index) {
+  const expanded = expandedFriends.has(member.id);
+  const visible = expanded ? member.tasks : member.closest;
+  return `${visible.length ? `<ul id="friend-tasks-${index}" class="friend-tasks" aria-label="${expanded ? 'Все задачи недели' : 'Ближайшие к завершению задачи'}">${visible.map((task) => {
+    const level = LEVELS[task.difficulty - 1], done = isDone(task);
+    const progress = task.mode === 'percent' ? `${task.progress}<small>%</small>` : task.target === 1 ? done ? icon('check') : '<span class="empty-check"></span>' : `${task.progress}<small>/${task.target}</small>`;
+    return `<li class="${done ? 'friend-task-done' : ''}" style="--level:${level.color}"><span class="friend-task-name">${esc(task.title)}</span><span class="progress-button friend-task-progress ${done ? 'filled' : ''}" role="img" aria-label="${task.progress} из ${task.target}${task.mode === 'percent' ? ' процентов' : ''}${done ? ', выполнено' : ''}"><span class="progress-fill" style="height:${fraction(task) * 100}%"></span><span class="progress-value">${progress}</span></span></li>`;
+  }).join('')}</ul>` : `<div id="friend-tasks-${index}" class="friend-empty">${member.stats.total ? `${icon('check')}<span>Все задачи выполнены</span>` : '<span>Нет задач на эту неделю</span>'}</div>`}
+  ${member.stats.total ? `<button type="button" class="friend-toggle" data-friend-toggle="${esc(member.id)}" aria-expanded="${expanded}" aria-controls="friend-tasks-${index}"><span>${expanded ? 'Свернуть' : `Все задачи · ${member.stats.total}`}</span>${icon('back')}</button>` : ''}`;
 }
 function renderProfile() {
   const data = displayProfile();

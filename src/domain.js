@@ -60,10 +60,12 @@ export function friendsOverview(profiles, tasks, week) {
   }
   return profiles.map((profile) => {
     const ownTasks = byOwner.get(profile.id) || [];
-    const closest = ownTasks.filter((task) => !isDone(task)).sort((a, b) =>
-      fraction(b) - fraction(a) || (a.created_at || '').localeCompare(b.created_at || '') || a.id.localeCompare(b.id)
-    ).slice(0, 3);
-    return { ...profile, stats: stats(ownTasks), closest };
+    const orderedTasks = [...ownTasks].sort((a, b) =>
+      Number(isDone(a)) - Number(isDone(b)) || fraction(b) - fraction(a)
+      || (a.created_at || '').localeCompare(b.created_at || '') || a.id.localeCompare(b.id)
+    );
+    const closest = orderedTasks.filter((task) => !isDone(task)).slice(0, 3);
+    return { ...profile, stats: stats(ownTasks), closest, tasks: orderedTasks };
   });
 }
 

@@ -61,8 +61,12 @@ test('friends compare relative completion, omit finished tasks and keep only thr
   assert.deepEqual(alex.closest.map((t) => t.id), ['percent', 'repeated', 'half']);
   assert.equal(alex.stats.total, 5);
   assert.equal(alex.stats.done, 1);
+  assert.deepEqual(alex.tasks.map((t) => t.id), ['percent', 'repeated', 'half', 'zero', 'done']);
+  assert.equal(alex.tasks.length, alex.stats.total);
+  assert.deepEqual(items.map((t) => t.id), ['repeated', 'percent', 'done', 'zero', 'half']);
   assert.equal(empty.stats.total, 0);
   assert.deepEqual(empty.closest, []);
+  assert.deepEqual(empty.tasks, []);
 });
 test('friends see carryover before owner logs in, without duplicates or resurrected deleted tasks', () => {
   const original = [
@@ -78,4 +82,25 @@ test('friends see carryover before owner logs in, without duplicates or resurrec
   assert.deepEqual(alex.closest.map((t) => t.rolled_from).sort(), ['current', 'pending']);
   assert.equal(original.length, 6);
   assert.equal(original[0].week_start, '2026-11-02');
+});
+
+test('expanded friend tasks include completed tasks for this week and exclude deleted, future and other owners', () => {
+  const week = '2026-11-09';
+  const items = [
+    task({ id: 'done', owner_id: 'alex', week_start: week, progress: 3 }),
+    task({ id: 'old-done', owner_id: 'alex', progress: 3 }),
+    task({ id: 'carry', owner_id: 'alex' }),
+    task({ id: 'deleted', owner_id: 'alex', week_start: week, deleted_at: week }),
+    task({ id: 'future', owner_id: 'alex', week_start: '2026-11-16' }),
+    task({ id: 'other', owner_id: 'masha', week_start: week }),
+  ];
+  const [alex] = friendsOverview([{ id: 'alex' }], items, week);
+  assert.equal(alex.tasks.length, 2);
+  assert.equal(alex.tasks[0].rolled_from, 'carry');
+  assert.equal(alex.tasks[1].id, 'done');
+  assert.equal(alex.stats.total, alex.tasks.length);
+  assert.equal(alex.stats.done, 1);
+  const [finished] = friendsOverview([{ id: 'alex' }], [items[0]], week);
+  assert.deepEqual(finished.closest, []);
+  assert.deepEqual(finished.tasks.map(t => t.id), ['done']);
 });
